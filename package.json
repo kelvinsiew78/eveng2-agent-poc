@@ -1,0 +1,36 @@
+{
+  "name": "eveng2-agent-poc",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Request logger + minimal OpenAI-compatible responder to replicate the Even Realities G2 'Add Agent' (custom Even AI agent) protocol.",
+  "license": "MIT",
+  "author": "Henrique Fuschini",
+  "homepage": "https://github.com/fuschini/eveng2-agent-poc#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fuschini/eveng2-agent-poc.git"
+  },
+  "bugs": {
+    "url": "https://github.com/fuschini/eveng2-agent-poc/issues"
+  },
+  "keywords": [
+    "even-realities",
+    "g2",
+    "smart-glasses",
+    "even-ai",
+    "openai-compatible",
+    "chat-completions",
+    "llm-agent"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "tunnel": "cloudflared tunnel --url http://localhost:3000"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}
