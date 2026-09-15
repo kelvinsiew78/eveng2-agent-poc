@@ -1,5 +1,6 @@
 export const config = {
   runtime: 'edge',
+  regions: ['sin1'],
 };
 
 export default async function handler(req) {
@@ -32,13 +33,12 @@ export default async function handler(req) {
   try {
     // 4. Parse incoming Even app request and trim history
     const body = await req.json();
+    
     // Only keep the last 4 messages to prevent the context window from bloating
     const incomingMessages = (body.messages || []).slice(-4);
 
-// 5. Translate OpenAI format to Gemini Native format
-    // Only keep the last 4 messages to prevent context bloat
-    const trimmedMessages = (body.messages || []).slice(-4);
-    const geminiContents = trimmedMessages.map(msg => ({
+    // 5. Translate OpenAI format to Gemini Native format
+    const geminiContents = incomingMessages.map(msg => ({
       role: msg.role === 'assistant' ? 'model' : 'user', 
       parts: [{ text: msg.content }]
     }));
@@ -53,7 +53,7 @@ export default async function handler(req) {
         maxOutputTokens: 180
       },
       tools: [
-        { google_search: {} } // This single line enables native web browsing
+        { googleSearch: {} } // Updated to camelCase for the REST API
       ]
     };
 
@@ -96,3 +96,13 @@ export default async function handler(req) {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });
+
+  } catch (error) {
+    // 8. Catch any execution errors gracefully
+    console.error("-> Edge fetch error:", error.message);
+    return new Response(JSON.stringify({ error: "Failed to connect to Gemini" }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+}
