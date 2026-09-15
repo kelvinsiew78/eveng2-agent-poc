@@ -34,11 +34,11 @@ export default async function handler(req) {
     const body = await req.json();
     const incomingMessages = body.messages || [];
 
-    // 5. Construct payload for Gemini 3.8 Flash
+    // 5. Construct payload for Gemini 3.6 Flash (Supported Fallback)
     const geminiPayload = {
       ...body,
-      model: "gemini-2.5-flash",
-      reasoning_effort: "low", // Forces the model to skip deep thinking for speed
+      model: "gemini-3.6-flash", 
+      reasoning_effort: "low",
       messages: [
         { 
           role: "system", 
