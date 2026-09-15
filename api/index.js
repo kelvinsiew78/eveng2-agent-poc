@@ -30,9 +30,10 @@ export default async function handler(req) {
   }
 
   try {
-    // 4. Parse incoming Even app request
+    // 4. Parse incoming Even app request and trim history
     const body = await req.json();
-    const incomingMessages = body.messages || [];
+    // Only keep the last 4 messages to prevent the context window from bloating
+    const incomingMessages = (body.messages || []).slice(-4);
 
 // 5. Construct payload for Gemini 3.5 Flash-Lite (Ultra-Fast)
 const geminiPayload = {
@@ -66,6 +67,17 @@ const geminiPayload = {
         status: geminiResponse.status,
         headers: { 'Content-Type': 'application/json' },
       });
+    }
+
+    // NEW: Intercept and strip markdown formatting
+    if (data.choices && data.choices[0] && data.choices[0].message) {
+        let rawText = data.choices[0].message.content;
+        
+        // Strip out asterisks, hashes, backticks, and tildes
+        let cleanText = rawText.replace(/[*#`~]/g, ''); 
+        
+        // Overwrite the original response with the clean text
+        data.choices[0].message.content = cleanText;
     }
 
     // 7. Return the response back to the glasses
