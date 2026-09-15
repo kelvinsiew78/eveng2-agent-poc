@@ -1,17 +1,14 @@
 /**
- * Even Realities G2 — custom Even AI agent PoC.
+ * Even Realities G2 — custom Even AI agent PoC with Gemini integration.
  *
  * The Even app's "Add Agent" feature treats your URL as an OpenAI
  * Chat Completions endpoint (non-streaming). It POSTs the transcribed
  * voice text and renders `choices[0].message.content` on the glasses.
  *
  * This server does two jobs:
- *   1. Logs the full incoming request (method, path, headers, body) so we
- *      can confirm exactly what *this* app/firmware version sends.
- *   2. Returns a valid chat-completion so the glasses actually display
- *      something (here: it just echoes you back).
- *
- * Swap the `reply` line for a real LLM call once the shape is confirmed.
+ *   1. Logs the full incoming request (method, path, headers, body).
+ *   2. Forwards the request to Google's Gemini OpenAI-compatible endpoint
+ *      and returns the real LLM response to the glasses.
  */
 import express from "express"
 
@@ -19,14 +16,12 @@ const app = express()
 app.use(express.json({ limit: "1mb" }))
 
 const PORT = process.env.PORT || 3000
-// Set to the token you typed into the Even app to enforce auth. Leave unset
-// while poking so you can see unauthenticated probes too.
+// Optional: Set to the token you typed into the Even app to enforce auth. 
+// Leave unset if you just want to rely on Vercel's environment variables for API keys.
 const TOKEN = process.env.G2_TOKEN
 
-// Single catch-all handler — works on any path/method and avoids Express 5's
-// wildcard-route syntax change. The app POSTs to the URL you enter verbatim,
-// so whatever path it uses lands here.
-app.use((req, res) => {
+// Single catch-all handler — works on any path/method
+app.use(async (req, res) => {
   console.log(
     `\n=== ${req.method} ${req.originalUrl}  ${new Date().toISOString()} ===`
   )
@@ -34,7 +29,7 @@ app.use((req, res) => {
   console.log("body:   ", JSON.stringify(req.body, null, 2))
 
   if (req.method === "GET")
-    return res.json({ status: "ok", agent: "eveng2-agent-poc" })
+    return res.json({ status: "ok", agent: "eveng2-gemini-bridge" })
   if (req.method !== "POST")
     return res.status(405).json({ error: "method not allowed" })
 
@@ -43,33 +38,40 @@ app.use((req, res) => {
     return res.status(401).json({ error: "unauthorized" })
   }
 
-  const userMsg = (req.body?.messages || [])
-    .filter((m) => m.role === "user")
-    .pop()
-  const text = userMsg?.content ?? "(no user message)"
+  // 1. Prepare the payload for Google, forcing a valid Gemini model
+  // The Even App hardcodes 'openclaw', so we override it here.
+  const geminiPayload = {
+    ...req.body,
+    model: "gemini-1.5-flash" 
+  };
 
-  // Keep it short + plain: G2 is 576x136 mono, ~48 chars wide, no markdown/links.
-  const reply = `You said: ${text}`.slice(0, 400)
-  console.log("-> reply:", reply)
-
-  res.json({
-    id: `g2-${Date.now()}`,
-    object: "chat.completion",
-    created: Math.floor(Date.now() / 1000),
-    model: "eveng2-agent-poc",
-    choices: [
-      {
-        index: 0,
-        message: { role: "assistant", content: reply },
-        finish_reason: "stop",
+  try {
+    // 2. Send the request to Google's OpenAI-compatible endpoint
+    const geminiResponse = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${process.env.GEMINI_API_KEY}`
       },
-    ],
-    usage: {
-      prompt_tokens: 0,
-      completion_tokens: reply.length,
-      total_tokens: reply.length,
-    },
-  })
+      body: JSON.stringify(geminiPayload)
+    });
+
+    const data = await geminiResponse.json();
+
+    // 3. Handle any Google API errors
+    if (!geminiResponse.ok) {
+      console.error("-> Gemini API Error:", data);
+      return res.status(geminiResponse.status).json(data);
+    }
+
+    // 4. Log the AI's reply and pass the valid JSON straight to the glasses
+    console.log("-> reply:", data.choices?.[0]?.message?.content);
+    return res.json(data);
+
+  } catch (error) {
+    console.error("-> Fetch error:", error);
+    return res.status(500).json({ error: "Failed to connect to Gemini" });
+  }
 })
 
 app.listen(PORT, () => {
