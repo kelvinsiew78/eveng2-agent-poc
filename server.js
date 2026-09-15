@@ -38,11 +38,11 @@ app.use(async (req, res) => {
     return res.status(401).json({ error: "unauthorized" })
   }
 
-  // 1. Prepare the payload for Google, forcing a valid Gemini model
+// 1. Prepare the payload for Google, forcing a valid Gemini model
   // The Even App hardcodes 'openclaw', so we override it here.
   const geminiPayload = {
     ...req.body,
-    model: "gemini-1.5-flash" 
+    model: "gemini-3.5-flash" 
   };
 
   try {
