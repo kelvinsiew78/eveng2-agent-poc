@@ -42,9 +42,10 @@ app.use(async (req, res) => {
   const incomingMessages = req.body.messages || [];
 
   // 2. Inject a system prompt and enforce strict limits
-  const geminiPayload = {
+ const geminiPayload = {
     ...req.body,
     model: "gemini-3.8-flash",
+    reasoning_effort: "low", // Add this line to force instant replies
     messages: [
       { 
         role: "system", 
@@ -52,7 +53,7 @@ app.use(async (req, res) => {
       },
       ...incomingMessages
     ],
-    max_tokens: 80 // Hard limit on output size to force an instant response
+    max_tokens: 80
   };
 
   try {
