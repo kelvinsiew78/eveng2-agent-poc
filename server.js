@@ -38,11 +38,21 @@ app.use(async (req, res) => {
     return res.status(401).json({ error: "unauthorized" })
   }
 
-// 1. Prepare the payload for Google, forcing a valid Gemini model
-  // The Even App hardcodes 'openclaw', so we override it here.
+// 1. Extract the messages the Even app sent
+  const incomingMessages = req.body.messages || [];
+
+  // 2. Inject a system prompt and enforce strict limits
   const geminiPayload = {
     ...req.body,
-    model: "gemini-3.8-flash" 
+    model: "gemini-3.8-flash",
+    messages: [
+      { 
+        role: "system", 
+        content: "You are an AI on a tiny smart glasses display. Keep your answers extremely brief, strictly 1 or 2 sentences max. Use plain text only—no markdown, asterisks, or lists." 
+      },
+      ...incomingMessages
+    ],
+    max_tokens: 80 // Hard limit on output size to force an instant response
   };
 
   try {
