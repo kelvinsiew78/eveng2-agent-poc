@@ -35,17 +35,17 @@ export default async function handler(req) {
     const incomingMessages = body.messages || [];
 
 // 5. Construct payload for Gemini 3.5 Flash-Lite (Ultra-Fast)
-    const geminiPayload = {
+const geminiPayload = {
       ...body,
       model: "gemini-3.5-flash-lite", 
       messages: [
         { 
           role: "system", 
-          content: "You are an AI on a tiny smart glasses display. Keep your answers extremely brief, strictly 1 or 2 sentences max. Use plain text only—no markdown, asterisks, or lists." 
+          content: `You are an AI on a tiny smart glasses display. Keep your answers extremely brief, strictly 1 or 2 sentences max. Use plain text only. The live weather for ${targetCity} is: ${liveWeather}. Use this data if they ask about the weather.` 
         },
         ...incomingMessages
       ],
-      max_tokens: 80
+      max_tokens: 180 // Enough room for 2-3 full sentences without cutting off
     };
 
     // 6. Forward directly to Google
