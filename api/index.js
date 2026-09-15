@@ -41,7 +41,7 @@ const geminiPayload = {
       messages: [
         { 
           role: "system", 
-          content: `You are an AI on a tiny smart glasses display. Keep your answers extremely brief, strictly 1 or 2 sentences max. Use plain text only. The live weather for ${targetCity} is: ${liveWeather}. Use this data if they ask about the weather.` 
+          content: "You are an AI on a tiny smart glasses display. Keep your answers extremely brief, strictly 1 or 2 sentences max. Use plain text only—no markdown, asterisks, or lists."  
         },
         ...incomingMessages
       ],
