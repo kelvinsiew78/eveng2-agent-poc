@@ -42,7 +42,7 @@ app.use(async (req, res) => {
   // The Even App hardcodes 'openclaw', so we override it here.
   const geminiPayload = {
     ...req.body,
-    model: "gemini-3.5-flash" 
+    model: "gemini-3.8-flash" 
   };
 
   try {
