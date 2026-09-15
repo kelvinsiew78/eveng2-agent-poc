@@ -37,7 +37,7 @@ export default async function handler(req) {
     // 5. Construct payload for Gemini 3.8 Flash
     const geminiPayload = {
       ...body,
-      model: "gemini-3.8-flash",
+      model: "gemini-3.1-flash",
       reasoning_effort: "low", // Forces the model to skip deep thinking for speed
       messages: [
         { 
