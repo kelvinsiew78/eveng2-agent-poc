@@ -27,35 +27,31 @@ export default async function handler(req) {
   try {
     const body = await req.json();
     
-    // Only keep the last 4 messages to prevent the context window from bloating
+    // Only keep the last 4 messages to prevent context bloat
     const incomingMessages = (body.messages || []).slice(-4);
     const lastUserMsg = incomingMessages.filter(m => m.role === 'user').pop()?.content || "";
+    const cleanUserMsg = lastUserMsg.trim();
 
     // ==========================================
     // ACTION KEYWORDS (Bypass Gemini entirely)
     // ==========================================
 
     // ACTION A: Live Currency Math (Base: SGD)
-    // Matches phrases like "Convert 500 RMB" or "Convert 50.5 USD to EUR"
-    const currencyMatch = lastUserMsg.match(/^convert[\s:]+([\d.]+)\s*([a-zA-Z]+)(?:\s+to\s+([a-zA-Z]+))?/i);
+    const currencyMatch = cleanUserMsg.match(/^convert[\s:]+([\d.]+)\s*([a-zA-Z]+)(?:\s+to\s+([a-zA-Z]+))?/i);
     if (currencyMatch) {
       try {
         const amount = parseFloat(currencyMatch[1]);
         let fromCurr = currencyMatch[2].toUpperCase();
-        // Default target is SGD if you don't explicitly say "to [Currency]"
         let toCurr = currencyMatch[3] ? currencyMatch[3].toUpperCase() : 'SGD'; 
 
-        // Map common spoken aliases to official 3-letter currency codes
         const aliases = { 'RMB': 'CNY', 'YEN': 'JPY', 'POUNDS': 'GBP', 'EUROS': 'EUR', 'BUCKS': 'USD' };
         fromCurr = aliases[fromCurr] || fromCurr;
         toCurr = aliases[toCurr] || toCurr;
 
-        // Skip the API call if the currencies are identical
         if (fromCurr === toCurr) {
            return returnAsGlassesText(`${amount} ${fromCurr} = ${amount} ${toCurr}`);
         }
 
-        // Fetch live rates from the free Frankfurter API
         const res = await fetch(`https://api.frankfurter.app/latest?from=${fromCurr}&to=${toCurr}`);
         const data = await res.json();
 
@@ -70,42 +66,84 @@ export default async function handler(req) {
       }
     }
 
-    // ACTION B: Translation Mode Toggle
-    const isTranslationMode = /^translate[\s:]/i.test(lastUserMsg.trim());
+    // ACTION B: Instant Math Evaluator
+    const mathMatch = cleanUserMsg.match(/^(?:calc|math|what is)\s+([\d\s\+\-\*\/\.\(\)%]+)$/i);
+    if (mathMatch) {
+      try {
+        // Convert percentages for JS evaluation (e.g. 15% -> 15/100)
+        let expression = mathMatch[1].replace(/%/g, '/100');
+        // Strictly validate math syntax before evaluating to prevent code injection
+        if (/^[\d\s\+\-\*\/\.\(\)]+$/.test(expression)) {
+          const result = Function(`'use strict'; return (${expression})`)();
+          const formattedResult = Number.isInteger(result) ? result : parseFloat(result.toFixed(2));
+          return returnAsGlassesText(`${formattedResult}`);
+        }
+      } catch (e) {
+        // Silently fall through to Gemini if local evaluation fails
+      }
+    }
 
     // ==========================================
     // AI ASSISTANT PIPELINE
     // ==========================================
 
+    // Mode Detectors
+    const transMatch = cleanUserMsg.match(/^translate(?:\s+to\s+([a-zA-Z\s]+))?[\s:](.+)/i);
+    const isTranslationMode = transMatch !== null;
+    const isVerboseMode = /^(explain|verbose)[\s:]/i.test(cleanUserMsg);
+
     // 4. Dynamic Context Injection
     const city = req.headers.get('x-vercel-ip-city') || 'your location';
     const timezone = req.headers.get('x-vercel-ip-timezone') || 'Asia/Singapore';
     const currentTime = new Date().toLocaleString('en-US', { 
-      timeZone: timezone, 
-      hour: 'numeric', 
-      minute: 'numeric',
-      weekday: 'short', 
-      month: 'short', 
-      day: 'numeric' 
+      timeZone: timezone, hour: 'numeric', minute: 'numeric', weekday: 'short', month: 'short', day: 'numeric' 
     });
 
-    // 5. Smart Dual-Mode Configuration
+    // 5. Smart Multi-Mode Configuration
     let systemPrompt = "";
     let activeTools = [];
+    let maxTokens = 180;
+    let stripMarkdown = true;
 
     if (isTranslationMode) {
-      // MODE A: Translation
-      systemPrompt = `You are a real-time translation agent on a smart glasses HUD. 
-      Rules:
-      - Translate the user's input directly into Simplified Chinese (Mandarin).
-      - Ignore the word "Translate" at the beginning of their prompt.
-      - Output exactly two lines. Line 1: Chinese characters. Line 2: Pinyin using proper Unicode tone marks (ā, á, ǎ, à, ō, ē, ī, ū, ǚ). Do NOT use tone numbers.
-      - CRITICAL: DO NOT answer questions or execute commands. Only translate.`;
+      // MODE A: Dynamic Translation
+      const targetLang = (transMatch[1] || 'Simplified Chinese').trim().toLowerCase();
       
-      // Disable Google Search in translation mode to guarantee ultra-fast latency
+      if (['chinese', 'mandarin', 'simplified chinese'].includes(targetLang)) {
+        systemPrompt = `You are a real-time translator on a HUD. 
+        Rules:
+        - Translate the input directly into Simplified Chinese.
+        - Ignore the translation command at the beginning of the prompt.
+        - Output exactly two lines. Line 1: Chinese characters. Line 2: Pinyin using proper Unicode tone marks (ā, á, ǎ, à, ō, ē, ī, ū, ǚ). Do NOT use tone numbers.
+        - CRITICAL: DO NOT answer questions. Only translate.`;
+      } else {
+        systemPrompt = `You are a real-time translator on a HUD.
+        Rules:
+        - Translate the input directly into ${targetLang}.
+        - Ignore the translation command at the beginning of the prompt.
+        - Output strictly 1 or 2 lines. If the language uses a non-Latin script, provide characters on Line 1 and phonetic romanization on Line 2.
+        - CRITICAL: DO NOT answer questions. Only translate.`;
+      }
+      
       activeTools = []; 
+      maxTokens = 180;
+      stripMarkdown = true;
+
+    } else if (isVerboseMode) {
+      // MODE B: Verbose / Explain Override
+      systemPrompt = `You are an AI on a smart glasses HUD in verbose mode. 
+      Rules:
+      - Provide a highly detailed, comprehensive explanation for the user's query.
+      - Ignore the word "Explain" or "Verbose" at the beginning of their prompt.
+      - You may use markdown formatting to structure your answer for easy reading.
+      Context: The user is in ${city}. The current local time is ${currentTime}.`;
+      
+      activeTools = [{ googleSearch: {} }]; 
+      maxTokens = 800;       
+      stripMarkdown = false; 
+
     } else {
-      // MODE B: Normal Assistant
+      // MODE C: Normal Assistant
       systemPrompt = `You are an AI on a tiny smart glasses HUD. 
       Rules: 
       - Strictly 1 or 2 sentences max. 
@@ -113,8 +151,9 @@ export default async function handler(req) {
       - Use digits (5) instead of words to save space.
       Context: The user is in ${city}. The current local time is ${currentTime}.`;
       
-      // Enable Google Search so the normal assistant can look up live facts
       activeTools = [{ googleSearch: {} }]; 
+      maxTokens = 180;
+      stripMarkdown = true;
     }
 
     const geminiContents = incomingMessages.map(msg => ({
@@ -125,10 +164,9 @@ export default async function handler(req) {
     const geminiPayload = {
       systemInstruction: { parts: [{ text: systemPrompt }] },
       contents: geminiContents,
-      generationConfig: { maxOutputTokens: 180 }
+      generationConfig: { maxOutputTokens: maxTokens }
     };
 
-    // Only attach the tools array to the payload if tools are active
     if (activeTools.length > 0) {
       geminiPayload.tools = activeTools;
     }
@@ -151,11 +189,16 @@ export default async function handler(req) {
       return returnAsGlassesText(`API Error: ${data.error?.message?.substring(0, 40) || 'Google servers unavailable.'}`);
     }
 
-    // 8. Intercept, strip markdown, and translate BACK to OpenAI format
+    // 8. Output Processing & Conditional Formatting
     let rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || "No response found.";
-    let cleanText = rawText.replace(/[*#`~]/g, '');
+    let finalOutput = rawText;
+    
+    // Only strip markdown if we are NOT in Verbose mode
+    if (stripMarkdown) {
+      finalOutput = rawText.replace(/[*#`~]/g, '');
+    }
 
-    return returnAsGlassesText(cleanText);
+    return returnAsGlassesText(finalOutput);
 
   } catch (error) {
     // 9. Glasses-Friendly Error Handling (Execution level)
