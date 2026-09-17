@@ -4,7 +4,6 @@ export const config = {
 };
 
 export default async function handler(req) {
-  // 1. Handle GET requests for testing
   if (req.method === 'GET') {
     return new Response(JSON.stringify({ status: 'ok', agent: 'eveng2-edge-bridge' }), {
       status: 200,
@@ -12,97 +11,88 @@ export default async function handler(req) {
     });
   }
 
-  // 2. Reject non-POST requests
   if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
-      status: 405,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405 });
   }
 
-  // 3. Security: Check G2_TOKEN if configured in Vercel
+  // 1. Security Check
   const token = process.env.G2_TOKEN;
   const authHeader = req.headers.get('authorization');
   if (token && authHeader !== `Bearer ${token}`) {
-    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
   }
 
   try {
-    // 4. Parse incoming Even app request and trim history
     const body = await req.json();
-    
-    // Only keep the last 4 messages to prevent the context window from bloating
     const incomingMessages = (body.messages || []).slice(-4);
 
-    // 5. Translate OpenAI format to Gemini Native format
+    // 2. Dynamic Context Injection (Time & Location)
+    const city = req.headers.get('x-vercel-ip-city') || 'your location';
+    const timezone = req.headers.get('x-vercel-ip-timezone') || 'Asia/Singapore';
+    const currentTime = new Date().toLocaleString('en-US', { 
+      timeZone: timezone, 
+      hour: 'numeric', 
+      minute: 'numeric', 
+      weekday: 'short', 
+      month: 'short', 
+      day: 'numeric' 
+    });
+
     const geminiContents = incomingMessages.map(msg => ({
       role: msg.role === 'assistant' ? 'model' : 'user', 
       parts: [{ text: msg.content }]
     }));
 
-    // Construct native payload with the Google Search tool enabled
+    // 3. Optimized System Prompt for Smart Glasses
+    const systemPrompt = `You are an AI on a tiny smart glasses HUD. 
+    Rules: 
+    - Strictly 1 or 2 sentences max. 
+    - Use plain text only (no markdown, asterisks, or hashes). 
+    - Use digits (5) instead of words (five) to save space.
+    Context: The user is in ${city}. The current local time is ${currentTime}.`;
+
     const geminiPayload = {
-      systemInstruction: {
-        parts: [{ text: "You are an AI on a tiny smart glasses display. Keep your answers extremely brief, strictly 1 or 2 sentences max. Use plain text only." }]
-      },
+      systemInstruction: { parts: [{ text: systemPrompt }] },
       contents: geminiContents,
-      generationConfig: {
-        maxOutputTokens: 180
-      },
-      tools: [
-        { googleSearch: {} } // Updated to camelCase for the REST API
-      ]
+      generationConfig: { maxOutputTokens: 180 },
+      tools: [{ googleSearch: {} }]
     };
 
-    // 6. Forward directly to Google's Native Endpoint
     const geminiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-goog-api-key": process.env.GEMINI_API_KEY // Native auth header
+        "x-goog-api-key": process.env.GEMINI_API_KEY
       },
       body: JSON.stringify(geminiPayload)
     });
 
     const data = await geminiResponse.json();
 
+    // 4. Glasses-Friendly Error Handling (API level)
     if (!geminiResponse.ok) {
       console.error("-> Gemini API Error:", data);
-      return new Response(JSON.stringify(data), {
-        status: geminiResponse.status,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return returnAsGlassesText(`API Error: ${data.error?.message?.substring(0, 40) || 'Google servers unavailable.'}`);
     }
 
-    // 7. Intercept, strip markdown, and translate BACK to OpenAI format
-    let rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || "No response";
+    let rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || "No response found.";
     let cleanText = rawText.replace(/[*#`~]/g, '');
 
-    const openAiFormattedResponse = {
-      choices: [
-        {
-          message: {
-            role: "assistant",
-            content: cleanText
-          }
-        }
-      ]
-    };
-
-    return new Response(JSON.stringify(openAiFormattedResponse), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return returnAsGlassesText(cleanText);
 
   } catch (error) {
-    // 8. Catch any execution errors gracefully
+    // 5. Glasses-Friendly Error Handling (Execution level)
     console.error("-> Edge fetch error:", error.message);
-    return new Response(JSON.stringify({ error: "Failed to connect to Gemini" }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return returnAsGlassesText("Proxy error: Failed to connect.");
   }
+}
+
+// Helper function to format any text into the OpenAI format the Even app expects
+function returnAsGlassesText(text) {
+  return new Response(JSON.stringify({
+    choices: [{ message: { role: "assistant", content: text } }]
+  }), {
+    status: 200, // Always return 200 so the glasses display the text instead of crashing
+    headers: { 'Content-Type': 'application/json' },
+  });
 }
