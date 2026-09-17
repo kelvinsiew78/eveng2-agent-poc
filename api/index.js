@@ -70,9 +70,7 @@ export default async function handler(req) {
     const mathMatch = cleanUserMsg.match(/^(?:calc|math|what is)\s+([\d\s\+\-\*\/\.\(\)%]+)$/i);
     if (mathMatch) {
       try {
-        // Convert percentages for JS evaluation (e.g. 15% -> 15/100)
         let expression = mathMatch[1].replace(/%/g, '/100');
-        // Strictly validate math syntax before evaluating to prevent code injection
         if (/^[\d\s\+\-\*\/\.\(\)]+$/.test(expression)) {
           const result = Function(`'use strict'; return (${expression})`)();
           const formattedResult = Number.isInteger(result) ? result : parseFloat(result.toFixed(2));
@@ -133,13 +131,14 @@ export default async function handler(req) {
       // MODE B: Verbose / Explain Override
       systemPrompt = `You are an AI on a smart glasses HUD in verbose mode. 
       Rules:
-      - Provide a highly detailed, comprehensive explanation for the user's query.
+      - Provide a detailed explanation for the user's query, but YOU MUST strictly stay under 1,500 characters.
       - Ignore the word "Explain" or "Verbose" at the beginning of their prompt.
       - You may use markdown formatting to structure your answer for easy reading.
       Context: The user is in ${city}. The current local time is ${currentTime}.`;
       
       activeTools = [{ googleSearch: {} }]; 
-      maxTokens = 800;       
+      // Hard cap to roughly 1,600 characters max to prevent the Even app buffer crash
+      maxTokens = 400;       
       stripMarkdown = false; 
 
     } else {
