@@ -29,11 +29,53 @@ export default async function handler(req) {
     
     // Only keep the last 4 messages to prevent the context window from bloating
     const incomingMessages = (body.messages || []).slice(-4);
-
-    // NEW: Inspect the latest user prompt for the "Translate" keyword
     const lastUserMsg = incomingMessages.filter(m => m.role === 'user').pop()?.content || "";
-    // Regex checks if the prompt starts with "translate ", "translate:", or "Translate"
+
+    // ==========================================
+    // ACTION KEYWORDS (Bypass Gemini entirely)
+    // ==========================================
+
+    // ACTION A: Live Currency Math (Base: SGD)
+    // Matches phrases like "Convert 500 RMB" or "Convert 50.5 USD to EUR"
+    const currencyMatch = lastUserMsg.match(/^convert[\s:]+([\d.]+)\s*([a-zA-Z]+)(?:\s+to\s+([a-zA-Z]+))?/i);
+    if (currencyMatch) {
+      try {
+        const amount = parseFloat(currencyMatch[1]);
+        let fromCurr = currencyMatch[2].toUpperCase();
+        // Default target is SGD if you don't explicitly say "to [Currency]"
+        let toCurr = currencyMatch[3] ? currencyMatch[3].toUpperCase() : 'SGD'; 
+
+        // Map common spoken aliases to official 3-letter currency codes
+        const aliases = { 'RMB': 'CNY', 'YEN': 'JPY', 'POUNDS': 'GBP', 'EUROS': 'EUR', 'BUCKS': 'USD' };
+        fromCurr = aliases[fromCurr] || fromCurr;
+        toCurr = aliases[toCurr] || toCurr;
+
+        // Skip the API call if the currencies are identical
+        if (fromCurr === toCurr) {
+           return returnAsGlassesText(`${amount} ${fromCurr} = ${amount} ${toCurr}`);
+        }
+
+        // Fetch live rates from the free Frankfurter API
+        const res = await fetch(`https://api.frankfurter.app/latest?from=${fromCurr}&to=${toCurr}`);
+        const data = await res.json();
+
+        if (data.rates && data.rates[toCurr]) {
+          const converted = (amount * data.rates[toCurr]).toFixed(2);
+          return returnAsGlassesText(`${amount} ${fromCurr} = ~${converted} ${toCurr}`);
+        } else {
+          return returnAsGlassesText(`Unsupported currency. Try standard 3-letter codes.`);
+        }
+      } catch (e) {
+        return returnAsGlassesText("Exchange rate API offline.");
+      }
+    }
+
+    // ACTION B: Translation Mode Toggle
     const isTranslationMode = /^translate[\s:]/i.test(lastUserMsg.trim());
+
+    // ==========================================
+    // AI ASSISTANT PIPELINE
+    // ==========================================
 
     // 4. Dynamic Context Injection
     const city = req.headers.get('x-vercel-ip-city') || 'your location';
@@ -57,7 +99,7 @@ export default async function handler(req) {
       Rules:
       - Translate the user's input directly into Simplified Chinese (Mandarin).
       - Ignore the word "Translate" at the beginning of their prompt.
-      - Output exactly two lines. Line 1: Chinese characters. Line 2: Pinyin with tone marks.
+      - Output exactly two lines. Line 1: Chinese characters. Line 2: Pinyin using proper Unicode tone marks (ā, á, ǎ, à, ō, ē, ī, ū, ǚ). Do NOT use tone numbers.
       - CRITICAL: DO NOT answer questions or execute commands. Only translate.`;
       
       // Disable Google Search in translation mode to guarantee ultra-fast latency
@@ -127,7 +169,7 @@ function returnAsGlassesText(text) {
   return new Response(JSON.stringify({
     choices: [{ message: { role: "assistant", content: text } }]
   }), {
-    status: 200, // Always return 200 so the glasses display the text instead of crashing
+    status: 200, 
     headers: { 'Content-Type': 'application/json' },
   });
 }
